@@ -1,0 +1,6 @@
+{
+  "initialized": true,
+  "theta_limit_deg": 47.2,
+  "omega_limit_deg_s": 141.5,
+  "source": "pre-computed from 하늘걷기.mov"
+}

@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/kimtaei/Library/Application Support/Claude/local-agent-mode-sessions/skills-plugin/c44b6f26-4815-47cf-9bf9-3a8104ecd91a/25fed4e5-f579-4317-b44e-e94510ccf8e6/skills/pptx/**)",
+      "Bash(python scripts/extract-text.py \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/팀플/인컴 중간발표-2/인컴 중간발표.pptx\")",
+      "Bash(python scripts/extract_text.py \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/팀플/인컴 중간발표-2/인컴 중간발표.pptx\")",
+      "Bash(python3 -c ' *)",
+      "Bash(pip3 install *)",
+      "Bash(ls /tmp/monitor_frames/)",
+      "Bash(python3 proj.py --input 하늘걷기.mov --profile profile.json --output result_monitor.mp4 --no-display --csv result_monitor.csv)",
+      "Bash(python3 proj.py --input 하늘걷기.mov --profile profile.json --output result.mp4 --no-display)",
+      "Bash(python3 proj.py --input 하늘걷기.mov --profile profile.json --output result.mp4 --no-display --csv result.csv)",
+      "Bash(cat /tmp/proj_video_version.py)",
+      "Bash(ffmpeg -i \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/AirBalance/result 오전 12.18.02.mp4\" -vf \"select=eq\\(n\\\\,60\\)\" -frames:v 1 /tmp/good_frame.jpg -y)",
+      "Bash(ffmpeg -i \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/AirBalance/result.mp4\" -vf \"select=eq\\(n\\\\,60\\)\" -frames:v 1 /tmp/cur_frame.jpg -y)",
+      "Bash(ffmpeg -i \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/AirBalance/result 오전 12.18.02.mp4\" -vf \"select=eq\\(n\\\\,200\\)\" -frames:v 1 /tmp/good_200.jpg -y)",
+      "Bash(ffmpeg -i \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/AirBalance/result 오전 12.18.02.mp4\" -vf \"select=eq\\(n\\\\,350\\)\" -frames:v 1 /tmp/good_350.jpg -y)",
+      "Bash(ffmpeg -i \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/AirBalance/result.mp4\" -vf \"select=eq\\(n\\\\,200\\)\" -frames:v 1 /tmp/cur_200.jpg -y)",
+      "Bash(ffmpeg -i \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/AirBalance/result.mp4\" -vf \"select=eq\\(n\\\\,350\\)\" -frames:v 1 /tmp/cur_350.jpg -y)",
+      "Bash(ffmpeg -i \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/AirBalance/result 오전 12.18.02.mp4\" -vf \"select=eq\\(n\\\\,200\\)\" -vsync vfr -update 1 /tmp/good_200.jpg -y)",
+      "Bash(ffmpeg -i \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/AirBalance/result.mp4\" -vf \"select=eq\\(n\\\\,200\\)\" -vsync vfr -update 1 /tmp/cur_200.jpg -y)",
+      "Read(//tmp/**)",
+      "Bash(ffmpeg -ss 8 -i \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/AirBalance/result 오전 12.18.02.mp4\" -frames:v 1 /tmp/good_8s.jpg -y)",
+      "Bash(ffmpeg -ss 8 -i \"/Users/kimtaei/Desktop/3/4-1/인간컴퓨터상호작용/AirBalance/result.mp4\" -frames:v 1 /tmp/cur_8s.jpg -y)",
+      "Bash(find \"/Users/kimtaei/Desktop\" -name \"example*.py\" 2>/dev/null)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('proj.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
+    ]
+  }
+}
