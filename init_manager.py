@@ -7,7 +7,7 @@ from constants import (
     InitState, INIT_DURATION, ABSENCE_THRESHOLD, ALPHA,
     CONF_THRESHOLD, KP_LEFT_HIP, KP_RIGHT_HIP,
     KP_LEFT_ANKLE, KP_RIGHT_ANKLE, LEG_LENGTH_TOLERANCE,
-    MISMATCH_THRESHOLD
+    MISMATCH_THRESHOLD, MIN_VALID_ANGLE
 )
 
 class InitializationManager:
@@ -309,7 +309,15 @@ class InitializationManager:
                 # 상위 15% 프레임 최대각도의 평균을 임계각으로 설정 (이상치에 강건한 Max 추정)
                 sorted_angles = sorted(self.landmark_buffer)
                 top_count = max(1, int(len(sorted_angles) * 0.15))
-                self.threshold_angle = sum(sorted_angles[-top_count:]) / top_count
+                temp_threshold = sum(sorted_angles[-top_count:]) / top_count
+
+                # 최소 유효 기준각 필터링 (가만히 서 있는 등의 불충분한 움직임 예외 처리)
+                if temp_threshold < MIN_VALID_ANGLE:
+                    print(f"[알림] 수집된 평균 기준각({temp_threshold:.1f}°)이 최소 유효값({MIN_VALID_ANGLE:.1f}°) 미만입니다. 측정을 다시 시작합니다.")
+                    self._reset_state()
+                    return None
+
+                self.threshold_angle = temp_threshold
 
                 # 다리 길이 중앙값: 사용자 변경 감지(DONE 상태 mismatch 검사)용
                 if self._leg_lengths:

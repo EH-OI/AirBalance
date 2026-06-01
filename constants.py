@@ -20,6 +20,10 @@ CONF_THRESHOLD       = 0.5     # 키포인트 신뢰도 최소값
 MIN_BBOX_AREA        = 5000.0  # 유효 바운딩박스 최소 면적 (픽셀²)
 LEG_LENGTH_TOLERANCE = 0.15    # 다리 길이 불일치 허용 오차 비율 (±15%)
 MISMATCH_THRESHOLD   = 1.5     # 사용자 불일치(ID/다리길이) 감지 후 리셋 대기 시간 (초)
+MIN_VALID_ANGLE      = 8.0     # 유효한 최소 기준각 (도) - 이보다 작으면 재초기화
+
+
+
 
 # ==========================================
 # 3. YOLO 키포인트 인덱스 (COCO 17 keypoints 기준)
