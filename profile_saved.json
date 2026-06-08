@@ -1,9 +1,9 @@
 {
   "initialized": true,
-  "baseline_deg": 5.013,
-  "warning_deg": 9.024,
-  "danger_deg": 9.024,
+  "baseline_deg": 9.201,
+  "warning_deg": 16.561,
+  "danger_deg": 16.561,
   "omega_limit_deg_s": 60.0,
-  "source": "영상/어린이(45도).MOV",
-  "leg_length_px": 333.2
+  "source": "영상/아동(45도).mp4",
+  "leg_length_px": 335.9
 }

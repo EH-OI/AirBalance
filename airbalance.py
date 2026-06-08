@@ -66,13 +66,13 @@ _ALERT_COOLDOWN = {"위험": 1.5}
 class SafetyProfile:
     """초기화 완료 후 생성되는 개인 안전 파라미터.
 
-    baseline_deg : 개인 기준각 (건보/찬보 수준 calibration 상위 15% 평균)
-    warning_deg  : 경고 임계각 = max(30°, baseline × WARN_MULT) (기본 1.5)
-    danger_deg   : 위험 임계각 = max(38°, baseline × DANG_MULT) (기본 2.0)
+    baseline_deg : 개인 기준각 (상위 15% 프레임 최대각 평균)
+    warning_deg  : 위험 판정 임계각 = baseline × DANG_MULT (기본 1.8)
+    danger_deg   : warning_deg 와 동일 (하위 호환용 필드, baseline × DANG_MULT)
     """
     initialized: bool
     baseline_deg: float          # 개인 기준각 (정상 최대 스윙)
-    warning_deg: float           # 경고 임계각 (baseline × 1.4)
+    warning_deg: float           # 위험 판정 임계각 (baseline × DANG_MULT, 1.8)
     danger_deg: float            # 위험 임계각 (baseline × 1.8)
     omega_limit_deg_s: float     # 각속도 한계 (deg/s)
     source: str                  # 파라미터 출처 설명
@@ -100,7 +100,7 @@ class Measurement:
     omega_deg_s: float          # EMA 스무딩 각속도
     score: float                # warning 대비 각도 비율 (0~150+, 표시용)
     average_score: float        # 경고 구간 지속 시간 (초, sustain 표시용)
-    state: str                  # 정상/주의/경고/위험
+    state: str                  # 정상/주의/위험
     color: Tuple[int, int, int]
     limit_exceeded: bool        # warning_deg 초과 여부
 
@@ -132,7 +132,7 @@ class AirBalanceMonitor:
     알고리즘:
       1. EMA 스무딩으로 각도·각속도 산출
       2. 순수 상대 임계값:
-           caution = baseline × 1.3   (CAUTION 시작)
+           caution = baseline × 1.2   (CAUTION 시작)
            danger  = baseline × 1.8   (DANGER 시작 — warning 각도 이상 즉시 위험)
       3. 레벨별 독립 지속 시간 조건:
            CAUTION: ≥caution_deg 상태 0.15s 이상 연속 → '주의'
@@ -146,8 +146,8 @@ class AirBalanceMonitor:
     """
 
     # ── 개인화 배율 ─────────────────────────────────────────────────────────
-    # baseline=10° → caution=13°, danger=18°  (학생)
-    # baseline=20° → caution=26°, danger=36°  (성인)
+    # baseline=10° → caution=12°, danger=18°  (학생)
+    # baseline=20° → caution=24°, danger=36°  (성인)
     CAUTION_MULT: float = 1.2  # caution = baseline × CAUTION_MULT
     DANG_MULT:    float = 1.8  # danger  = baseline × DANG_MULT (구 warning 각도)
 
@@ -165,7 +165,7 @@ class AirBalanceMonitor:
     ) -> None:
         self.profile     = profile
         self.baseline    = profile.baseline_deg
-        self.caution     = self.baseline * self.CAUTION_MULT  # 1.3× 초과 시 CAUTION
+        self.caution     = self.baseline * self.CAUTION_MULT  # 1.2× 초과 시 CAUTION
         self.danger      = profile.warning_deg                # warning 이상 → 즉시 DANGER
         self.omega_limit = profile.omega_limit_deg_s
         self.angle_tau   = angle_smoothing_tau
@@ -831,6 +831,65 @@ def _derive_omega_limit(theta_limit: float) -> float:
     return float(np.clip(theta_limit * 3.0, 60.0, 300.0))
 
 
+def scan_cameras(max_index: int = 6) -> List[Tuple[int, str]]:
+    """
+    사용 가능한 카메라 장치를 인덱스 0부터 순서대로 스캔한다.
+    반환: [(인덱스, "WxH 해상도"), ...]
+    """
+    available: List[Tuple[int, str]] = []
+    for i in range(max_index):
+        cap = cv2.VideoCapture(i)
+        if cap.isOpened():
+            ret, _ = cap.read()
+            if ret:
+                w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                available.append((i, f"{w}x{h}"))
+            cap.release()
+    return available
+
+
+def find_iphone_camera_index() -> Optional[int]:
+    """
+    아이폰 카메라 장치 인덱스를 자동 탐색한다.
+
+    두 가지 연결 방식을 모두 지원한다:
+      - Continuity Camera (연속성 카메라): macOS 13+ 내장 기능, 앱 불필요.
+        같은 Apple ID + Wi-Fi/Bluetooth 활성화 시 자동 연결.
+      - iVCam v7.x: 서드파티 앱 사용 시.
+
+    macOS: system_profiler SPCameraDataType 으로 'iphone' 또는 'ivcam'
+           문자열 확인 후 인덱스 1부터 스캔.
+    탐색 실패 시 None 반환.
+    """
+    if platform.system() == "Darwin":
+        try:
+            result = subprocess.run(
+                ["system_profiler", "SPCameraDataType"],
+                capture_output=True, text=True, timeout=5,
+            )
+            info = result.stdout.lower()
+            found = "iphone" in info or "ivcam" in info
+            if not found:
+                print("[iPhone 카메라] 시스템에서 아이폰 카메라를 찾을 수 없습니다.")
+                print("  [Continuity Camera] 아이폰과 맥북이 같은 Apple ID에 로그인되어 있고")
+                print("  Wi-Fi + Bluetooth 가 켜져 있는지 확인하세요. (macOS 13+, iOS 16+)")
+                print("  [iVCam] iVCam v7 앱이 아이폰과 맥북 양쪽에서 실행 중인지 확인하세요.")
+                return None
+        except Exception:
+            pass  # system_profiler 실패 시 스캔으로 폴백
+
+    # 인덱스 0은 내장 카메라이므로 1부터 탐색
+    for idx in range(1, 7):
+        cap = cv2.VideoCapture(idx)
+        if cap.isOpened():
+            ret, _ = cap.read()
+            cap.release()
+            if ret:
+                return idx
+    return None
+
+
 # ──────────────────────────────────────────────
 # 통합 파이프라인
 # ──────────────────────────────────────────────
@@ -846,7 +905,7 @@ def run_integrated(args: argparse.Namespace) -> None:
     단계 2 [모니터링 / 오른쪽 분기]:
         PoseEstimator(MediaPipe) + AirBalanceMonitor
         → 관절 각도 산출 → 각속도 산출 → 위험도 점수 산출
-        → 단계 분류 (정상/주의/경고/위험) → 경고 출력 (시각/청각)
+        → 단계 분류 (정상/주의/위험) → 경고 출력 (시각/청각)
     """
 
     # ── 영상 소스 결정 ────────────────────────
@@ -890,6 +949,9 @@ def run_integrated(args: argparse.Namespace) -> None:
             "side", "angle_mode",
             "theta_deg", "omega_deg_s",
             "score", "average_score", "state", "spread_deg",
+            "n_real_legs",
+            "l_hip_conf", "l_knee_conf", "l_ankle_conf",
+            "r_hip_conf", "r_knee_conf", "r_ankle_conf",
         ])
 
     # ── 영상 저장 설정 ────────────────────────
@@ -907,9 +969,27 @@ def run_integrated(args: argparse.Namespace) -> None:
     if not args.no_display:
         print("[AirBalance] 종료: 창에서 q 또는 ESC")
 
+    # ── 벤치마크 변수 ─────────────────────────────
+    benchmark = getattr(args, 'benchmark', False)
+    _t_yolo:      List[float] = []   # YOLO 추론 시간 (초기화 분기)
+    _t_mediapipe: List[float] = []   # MediaPipe 추론 시간 (모니터링 분기)
+    _t_frame:     List[float] = []   # 프레임 전체 처리 시간
+
+    # ── 외삽 통계 카운터 ──────────────────────────
+    _cnt_monitoring = 0   # 모니터링 총 프레임
+    _cnt_both_real  = 0   # 양측 실측 감지
+    _cnt_one_extrap = 0   # 단측 외삽 보완
+    _cnt_fail       = 0   # 감지 완전 실패 (양측 누락)
+
+    # ── confidence 추적 ───────────────────────────
+    _conf_keys = ["l_hip", "l_knee", "l_ankle", "r_hip", "r_knee", "r_ankle"]
+    _conf_data: Dict[str, List[float]] = {k: [] for k in _conf_keys}
+
     frame_index = 0
     try:
         while True:
+            _t0 = time.perf_counter()
+
             ret, frame = video.read_frame()
             if not ret:
                 if not getattr(args, 'loop', False):
@@ -927,7 +1007,9 @@ def run_integrated(args: argparse.Namespace) -> None:
             # [단계 1] 초기화 플로우 (왼쪽 분기)
             # ════════════════════════════════════
             if not init_manager.is_done():
+                _ty0 = time.perf_counter()
                 detection = yolo.detect(frame)
+                _t_yolo.append(time.perf_counter() - _ty0)
                 init_manager.process_frame(detection)
 
                 if (detection is not None
@@ -1006,8 +1088,20 @@ def run_integrated(args: argparse.Namespace) -> None:
 
                 # MediaPipe 포즈 추정
                 ts_ms = int(round(ts * 1000.0))
+                _tm0 = time.perf_counter()
                 raw_lm = estimator.detect(frame, ts_ms)
+                _t_mediapipe.append(time.perf_counter() - _tm0)
                 landmarks = lm_smoother.smooth(raw_lm, ts) if raw_lm is not None else None
+
+                if raw_lm is not None:
+                    _fc = (
+                        _lm_confidence(raw_lm[23]), _lm_confidence(raw_lm[25]), _lm_confidence(raw_lm[27]),
+                        _lm_confidence(raw_lm[24]), _lm_confidence(raw_lm[26]), _lm_confidence(raw_lm[28]),
+                    )
+                else:
+                    _fc = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+                for _ck, _cv in zip(_conf_keys, _fc):
+                    _conf_data[_ck].append(_cv)
 
                 # --debug-lm: 33개 랜드마크 전체 시각화 (진단용)
                 if getattr(args, 'debug_lm', False) and landmarks is not None:
@@ -1034,6 +1128,14 @@ def run_integrated(args: argparse.Namespace) -> None:
                 readings = leg_filter.process(raw_readings, h_fr, w_fr)
                 # spread 재계산 (extrapolation 포함 2개일 때)
                 real = [r for r in readings if not r.is_extrapolated]
+                _cnt_monitoring += 1
+                n_real = len(real)
+                if n_real >= 2:
+                    _cnt_both_real += 1
+                elif n_real == 1:
+                    _cnt_one_extrap += 1
+                else:
+                    _cnt_fail += 1
                 if len(real) == 2:
                     spread_angle = AirBalanceMonitor._inter_leg_angle(real[0], real[1])
                 # 외삽 reading은 angle 계산에서 제외
@@ -1081,7 +1183,12 @@ def run_integrated(args: argparse.Namespace) -> None:
                         f"{measurement.average_score:.3f}",
                         measurement.state,
                         f"{spread_angle:.1f}" if spread_angle is not None else "",
+                        n_real,
+                        *[f"{v:.3f}" for v in _fc],
                     ])
+
+            # ── 프레임 처리 시간 기록 ──────────────────
+            _t_frame.append(time.perf_counter() - _t0)
 
             if writer is not None:
                 writer.write(frame)
@@ -1105,6 +1212,57 @@ def run_integrated(args: argparse.Namespace) -> None:
         cv2.destroyAllWindows()
 
     print(f"[AirBalance] 완료: {frame_index} 프레임 처리")
+
+    # ── 가려짐 보완 성능 통계 ─────────────────────────────────────────────────
+    if _cnt_monitoring > 0:
+        t = _cnt_monitoring
+        print("\n┌───────────────────────────────┬────────┬─────────┐")
+        print("│           가려짐 보완 성능 통계                   │")
+        print("├───────────────────────────────┼────────┼─────────┤")
+        print("│ 구분                          │ 프레임 │  비율   │")
+        print("├───────────────────────────────┼────────┼─────────┤")
+        print(f"│ 양측 실측 감지                │ {_cnt_both_real:6d} │ {_cnt_both_real/t*100:6.1f}% │")
+        print(f"│ 단측 외삽 보완                │ {_cnt_one_extrap:6d} │ {_cnt_one_extrap/t*100:6.1f}% │")
+        print(f"│ 감지 완전 실패 (양측 누락)    │ {_cnt_fail:6d} │ {_cnt_fail/t*100:6.1f}% │")
+        print("├───────────────────────────────┼────────┼─────────┤")
+        print(f"│ 모니터링 총 프레임            │ {t:6d} │  100.0% │")
+        print("└───────────────────────────────┴────────┴─────────┘")
+
+    # ── confidence 통계 ───────────────────────────────────────────────────────
+    if _conf_data["l_hip"]:
+        labels = ["L Hip  ", "L Knee ", "L Ankle", "R Hip  ", "R Knee ", "R Ankle"]
+        print("\n┌──────────┬────────┬────────┬────────┬────────┬────────┬────────┐")
+        print("│              랜드마크 confidence 통계                          │")
+        print("├──────────┼────────┼────────┼────────┼────────┼────────┼────────┤")
+        print("│ 관절     │  mean  │  min   │  p25   │  p50   │  p75   │  max   │")
+        print("├──────────┼────────┼────────┼────────┼────────┼────────┼────────┤")
+        for label, key in zip(labels, _conf_keys):
+            arr = np.array(_conf_data[key])
+            print(f"│ {label} │ {arr.mean():.3f}  │ {arr.min():.3f}  │ "
+                  f"{np.percentile(arr,25):.3f}  │ {np.percentile(arr,50):.3f}  │ "
+                  f"{np.percentile(arr,75):.3f}  │ {arr.max():.3f}  │")
+        print("└──────────┴────────┴────────┴────────┴────────┴────────┴────────┘")
+
+    # ── 벤치마크 요약 출력 ────────────────────────────────────────────────────
+    if benchmark and _t_frame:
+        def _ms(lst: List[float]) -> str:
+            if not lst:
+                return "N/A"
+            avg = sum(lst) / len(lst) * 1000
+            mx  = max(lst) * 1000
+            return f"avg {avg:.1f}ms  max {mx:.1f}ms"
+
+        total_s = sum(_t_frame)
+        avg_fps = len(_t_frame) / total_s if total_s > 0 else 0.0
+        print("\n┌─────────────────────────────────────────────┐")
+        print("│              Benchmark 결과                 │")
+        print("├─────────────────────────────────────────────┤")
+        print(f"│ 총 프레임          : {frame_index:>6} frames            │")
+        print(f"│ 평균 FPS           : {avg_fps:>6.1f} fps              │")
+        print(f"│ 프레임 처리 시간   : {_ms(_t_frame):<28} │")
+        print(f"│ YOLO 추론 시간     : {_ms(_t_yolo):<28} │")
+        print(f"│ MediaPipe 추론 시간: {_ms(_t_mediapipe):<28} │")
+        print("└─────────────────────────────────────────────┘")
 
 
 # ──────────────────────────────────────────────
@@ -1180,6 +1338,9 @@ def run_standalone(args: argparse.Namespace) -> None:
             "side", "angle_mode",
             "theta_deg", "omega_deg_s",
             "score", "average_score", "state", "spread_deg",
+            "n_real_legs",
+            "l_hip_conf", "l_knee_conf", "l_ankle_conf",
+            "r_hip_conf", "r_knee_conf", "r_ankle_conf",
         ])
 
     print(f"[독립 모드] 프로필: {profile.source}")
@@ -1189,6 +1350,12 @@ def run_standalone(args: argparse.Namespace) -> None:
     spread_limit = profile.warning_deg * 2.0
     last_readings:    List[LegReading]      = []
     last_measurement: Optional[Measurement] = None
+    _cnt_monitoring = 0
+    _cnt_both_real  = 0
+    _cnt_one_extrap = 0
+    _cnt_fail       = 0
+    _conf_keys = ["l_hip", "l_knee", "l_ankle", "r_hip", "r_knee", "r_ankle"]
+    _conf_data: Dict[str, List[float]] = {k: [] for k in _conf_keys}
     frame_index = 0
     try:
         while cap.isOpened():
@@ -1199,6 +1366,15 @@ def run_standalone(args: argparse.Namespace) -> None:
             ts_ms = int(round(ts * 1000.0))
             raw_lm = estimator.detect(frame, ts_ms)
             landmarks = lm_smoother.smooth(raw_lm, ts) if raw_lm is not None else None
+            if raw_lm is not None:
+                _fc = (
+                    _lm_confidence(raw_lm[23]), _lm_confidence(raw_lm[25]), _lm_confidence(raw_lm[27]),
+                    _lm_confidence(raw_lm[24]), _lm_confidence(raw_lm[26]), _lm_confidence(raw_lm[28]),
+                )
+            else:
+                _fc = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+            for _ck, _cv in zip(_conf_keys, _fc):
+                _conf_data[_ck].append(_cv)
             h_fr, w_fr = frame.shape[:2]
             raw_readings, spread_angle = extract_leg_readings(
                 landmarks, frame,
@@ -1207,6 +1383,14 @@ def run_standalone(args: argparse.Namespace) -> None:
             )
             readings = leg_filter.process(raw_readings, h_fr, w_fr)
             real = [r for r in readings if not r.is_extrapolated]
+            _cnt_monitoring += 1
+            n_real = len(real)
+            if n_real >= 2:
+                _cnt_both_real += 1
+            elif n_real == 1:
+                _cnt_one_extrap += 1
+            else:
+                _cnt_fail += 1
             if len(real) == 2:
                 spread_angle = AirBalanceMonitor._inter_leg_angle(real[0], real[1])
             measurement = monitor.process_readings(real if real else readings, ts)
@@ -1231,6 +1415,8 @@ def run_standalone(args: argparse.Namespace) -> None:
                         f"{measurement.average_score:.3f}",
                         measurement.state,
                         f"{spread_angle:.1f}" if spread_angle is not None else "",
+                        n_real,
+                        *[f"{v:.3f}" for v in _fc],
                     ])
             tracking_ok = bool(readings)
             disp_readings    = readings    if readings    else last_readings
@@ -1260,6 +1446,34 @@ def run_standalone(args: argparse.Namespace) -> None:
         cv2.destroyAllWindows()
 
     print(f"[독립 모드] 완료: {frame_index} 프레임 처리")
+
+    if _cnt_monitoring > 0:
+        t = _cnt_monitoring
+        print("\n┌───────────────────────────────┬────────┬─────────┐")
+        print("│           가려짐 보완 성능 통계                   │")
+        print("├───────────────────────────────┼────────┼─────────┤")
+        print("│ 구분                          │ 프레임 │  비율   │")
+        print("├───────────────────────────────┼────────┼─────────┤")
+        print(f"│ 양측 실측 감지                │ {_cnt_both_real:6d} │ {_cnt_both_real/t*100:6.1f}% │")
+        print(f"│ 단측 외삽 보완                │ {_cnt_one_extrap:6d} │ {_cnt_one_extrap/t*100:6.1f}% │")
+        print(f"│ 감지 완전 실패 (양측 누락)    │ {_cnt_fail:6d} │ {_cnt_fail/t*100:6.1f}% │")
+        print("├───────────────────────────────┼────────┼─────────┤")
+        print(f"│ 모니터링 총 프레임            │ {t:6d} │  100.0% │")
+        print("└───────────────────────────────┴────────┴─────────┘")
+
+    if _conf_data["l_hip"]:
+        labels = ["L Hip  ", "L Knee ", "L Ankle", "R Hip  ", "R Knee ", "R Ankle"]
+        print("\n┌──────────┬────────┬────────┬────────┬────────┬────────┬────────┐")
+        print("│              랜드마크 confidence 통계                          │")
+        print("├──────────┼────────┼────────┼────────┼────────┼────────┼────────┤")
+        print("│ 관절     │  mean  │  min   │  p25   │  p50   │  p75   │  max   │")
+        print("├──────────┼────────┼────────┼────────┼────────┼────────┼────────┤")
+        for label, key in zip(labels, _conf_keys):
+            arr = np.array(_conf_data[key])
+            print(f"│ {label} │ {arr.mean():.3f}  │ {arr.min():.3f}  │ "
+                  f"{np.percentile(arr,25):.3f}  │ {np.percentile(arr,50):.3f}  │ "
+                  f"{np.percentile(arr,75):.3f}  │ {arr.max():.3f}  │")
+        print("└──────────┴────────┴────────┴────────┴────────┴────────┴────────┘")
 
 
 # ──────────────────────────────────────────────
@@ -1308,11 +1522,46 @@ def parse_args() -> argparse.Namespace:
                    help="영상 끝에서 처음으로 돌아가 반복 (q/ESC로 종료)")
     p.add_argument("--debug-lm",  action="store_true",
                    help="모니터링 구간에서 MediaPipe 33개 랜드마크 전체 표시 (진단용)")
+    p.add_argument("--benchmark", action="store_true",
+                   help="FPS·지연시간 측정 모드. 화면에 실시간 표시 + 종료 시 통계 출력")
+    # ── iVCam (아이폰 카메라 연동) ────────────────────────────────────────────
+    p.add_argument("--ivcam", action="store_true",
+                   help="iVCam v7 으로 연결된 아이폰 카메라를 자동 탐색하여 입력으로 사용")
+    p.add_argument("--list-cameras", action="store_true",
+                   help="사용 가능한 카메라 장치 목록을 출력하고 종료 (iVCam 인덱스 확인용)")
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+
+    # ── 카메라 목록 출력 후 종료 ──────────────────────────────────────────────
+    if args.list_cameras:
+        cameras = scan_cameras()
+        if not cameras:
+            print("[카메라] 사용 가능한 장치가 없습니다.")
+        else:
+            print("[카메라 목록]")
+            for idx, res in cameras:
+                label = " ← 내장 카메라 (MacBook FaceTime)" if idx == 0 else ""
+                print(f"  [{idx}]  해상도: {res}{label}")
+            print("\niVCam 사용 시: python airbalance.py --ivcam --webcam")
+        return
+
+    # ── iVCam 자동 탐색 ──────────────────────────────────────────────────────
+    if args.ivcam:
+        print("[iVCam] 아이폰 카메라 장치를 탐색합니다...")
+        idx = find_iphone_camera_index()
+        if idx is None:
+            print("[iVCam] 장치를 찾을 수 없습니다.\n"
+                  "  1. 아이폰에서 iVCam 앱을 실행하세요.\n"
+                  "  2. 맥북과 같은 Wi-Fi 또는 USB로 연결하세요.\n"
+                  "  3. 맥에서 iVCam 소프트웨어(v7.x)가 실행 중인지 확인하세요.\n"
+                  "  4. --list-cameras 로 인덱스를 직접 확인 후 --camera-index N 으로 지정할 수 있습니다.")
+            return
+        args.camera_index = idx
+        args.webcam = True
+        print(f"[iVCam] 인덱스 [{idx}] 장치로 연결합니다. (아이폰 카메라)")
 
     # omega_limit 자동 계산
     if args.omega_limit <= 0:
